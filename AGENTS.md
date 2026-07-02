@@ -4,7 +4,7 @@ This file defines the working contract for coding agents in `kata-go-sai`.
 
 ## Project intent
 
-Build a browser-first Go/Weiqi application. The deployed static app must remain usable without a server. Do not claim that a heuristic bot, a raw policy network, or a reduced search is “KataGo” unless the real engine and model are actually running.
+Build a browser-first Go/Weiqi application. The deployed static app must remain usable without a server. The current browser engine runs an official KataGo 10-block network as a raw policy network. Do not imply that raw policy inference includes KataGo MCTS or has professional strength.
 
 ## Required checks
 
@@ -56,12 +56,14 @@ Keep `rules.ts` data serializable with structured clone so it can cross a Worker
 
 ## AI and model work
 
-The current bot is a lightweight heuristic baseline. Any stronger engine should implement explicit initialization, cancellable move generation, optional streaming analysis, and disposal.
+The current bot is `kata1-b10c128-s1141046784-d204142634`, converted to a TensorFlow.js GraphModel and executed with WebGL inside a Worker. `kataFeatures.ts` is responsible for its 22 spatial and 19 global features. Preserve named model inputs/outputs, tensor disposal, explicit initialization, and visible error states.
+
+The current default `careful` mode must select the highest-policy legal move. Do not silently replace model failures with heuristic play. A failure must be visible and the board must remain usable in two-player mode.
 
 Preferred long-term split:
 
 - Rust/WASM: rules, feature encoding, Zobrist hashing, MCTS/PUCT, tree reuse, and compact memory management.
-- WebGPU/ONNX Runtime Web or another measured browser GPU backend: neural-network tensor execution.
+- TensorFlow.js WebGL is the measured current backend; WebGPU/ONNX Runtime Web may replace it only after comparative measurements.
 - Web Worker: orchestration and isolation from rendering.
 - Remote KataGo analysis service: optional high-strength mode, with local fallback.
 
@@ -81,7 +83,7 @@ Model strength claims require a reproducible match setup. In particular, do not 
 
 - Use `npm ci` in CI and commit `package-lock.json` whenever dependencies change.
 - Do not commit `node_modules`, `dist`, coverage, Vite-emitted config files, or `*.tsbuildinfo`.
-- Prefer a small dependency surface. Phaser, React, Vite, and Tailwind are deliberate choices; justify additional runtime packages.
+- Prefer a small dependency surface. Phaser, React, TensorFlow.js, Vite, and Tailwind are deliberate choices; justify additional runtime packages.
 - Keep the GitHub Pages base path configurable through `VITE_BASE_PATH`.
 
 ## Reference projects
@@ -92,4 +94,4 @@ Sibling directories are read-only references:
 - `../KataGo`: rules/search/model semantics and backend constraints.
 - `../go`: small TF.js network and no-MCTS browser baseline.
 
-Do not edit or copy generated/model artifacts from sibling repositories. Verify licenses and provenance before importing source code, weights, images, or data.
+Do not edit sibling repositories. Verify licenses and provenance before importing source code, weights, images, or data. Imported model assets must include a local license and provenance record.

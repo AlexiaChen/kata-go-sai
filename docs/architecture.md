@@ -10,7 +10,7 @@ Vite 可以直接构建 React，本项目已使用 React + Vite + Tailwind CSS 4
 2. Rust/WASM 管理高频规则、特征编码、MCTS 树和内存布局。
 3. 神经网络张量计算优先使用 WebGPU；WASM SIMD 作为兼容回退，而不是唯一后端。
 
-当前仓库先实现了第 1 层和可替换的 Worker 协议，并用 TypeScript 规则/启发式 AI 作为可运行基线。
+当前仓库已经实现第 1 层、可替换的 Worker 协议，以及 TensorFlow.js/WebGL 10-block 裸网络推理。Rust/WASM MCTS 和远端原生 KataGo 仍是后续阶段。
 
 ## 2. 三个项目的原理差异
 
@@ -40,10 +40,10 @@ KataGo 不是 NNUE。它以多层卷积/残差网络同时输出 policy、胜率
 
 ## 3. 推荐的渐进式推理方案
 
-### A. 纯静态、裸小网
+### A. 纯静态、裸小网（当前已实现）
 
 - 模型：6-block 或 10-block，4–11 MB 量级；
-- 后端：ONNX Runtime Web/WebGPU，兼容路径可用 WASM 或 TF.js WebGL；
+- 后端：当前为 TensorFlow.js WebGL；后续可对比 ONNX Runtime Web/WebGPU；
 - 搜索：无，或只做规则过滤和少量战术修正；
 - 目标：快速、离线、约 5 级到业余初段，不承诺职业棋力。
 
@@ -70,15 +70,15 @@ KataGo 不是 NNUE。它以多层卷积/残差网络同时输出 policy、胜率
 
 ## 4. 引擎边界
 
-当前 `src/engine/types.ts` 定义了 Worker 请求/响应。后续应保持 UI 不感知具体引擎：
+当前 `src/engine/types.ts` 定义了 Worker 请求/响应，`kataFeatures.ts` 生成固定的 `[1,361,22]` 和 `[1,19]` 输入，`browserAi.worker.ts` 加载 10-block GraphModel。UI 不感知 TensorFlow.js 细节：
 
 ```text
 React / Phaser
       │ GameState + search budget
       ▼
 Engine Worker
-      ├── heuristic（当前）
-      ├── Rust/WASM MCTS + WebGPU model
+      ├── TensorFlow.js 10-block 裸网络（当前）
+      ├── Rust/WASM MCTS + WebGPU model（规划）
       └── remote KataGo analysis client
 ```
 
@@ -99,3 +99,5 @@ Engine Worker
 - Chrome WebGPU、Safari WebGPU、无 WebGPU 回退行为；
 - 连续 20 盘后的内存是否稳定；
 - 对固定 GTP 对手的 Elo/胜率，而不是用模型大小推断棋力。
+
+当前在无头 Chromium WebGL 环境中的一次开发态测量为：首次下载、加载和 shader 预热约 10.8 秒，预热后单次 19 路推理约 0.53 秒。该数字只用于证明交互可行，不代表所有设备；生产部署和真实 GPU/移动设备仍需分别测量。
