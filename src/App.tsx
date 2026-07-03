@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import GoBoard from './components/GoBoard'
-import { InfoIcon, NewIcon, PassIcon, SparkIcon, UndoIcon } from './components/Icons'
+import { InfoIcon, NewIcon, PassIcon, UndoIcon } from './components/Icons'
 import type { AiLevel, AiResponse } from './engine/types'
 import { createGame, formatPoint, hashBoard, other, passTurn, playMove, scoreChineseArea, undo } from './game/rules'
 import type { GameState, Stone } from './game/types'
@@ -14,18 +14,6 @@ const levelLabels: Record<AiLevel, string> = {
 
 const stoneLabels: Record<Stone, string> = { black: '黑', white: '白' }
 
-interface SearchMeta {
-  elapsedMs: number
-  candidates: number
-  backend: string
-  scoreLead: number
-  visits: number
-  batches: number
-  treeReused: boolean
-  retainedVisits: number
-  principalVariation: Array<number | null>
-}
-
 type EngineStatus = 'loading' | 'optimizing' | 'ready' | 'error'
 
 function App() {
@@ -36,9 +24,7 @@ function App() {
   const [game, setGame] = useState<GameState>(() => createGame())
   const [thinking, setThinking] = useState(false)
   const [notice, setNotice] = useState('黑方先行，请落子')
-  const [searchMeta, setSearchMeta] = useState<SearchMeta | null>(null)
   const [engineStatus, setEngineStatus] = useState<EngineStatus>('loading')
-  const [engineInfo, setEngineInfo] = useState<{ backend: string; loadMs: number } | null>(null)
   const workerRef = useRef<Worker | null>(null)
   const requestRef = useRef<{ id: number; hash: string } | null>(null)
   const nextRequestId = useRef(0)
@@ -58,14 +44,11 @@ function App() {
 
       if (response.type === 'ready') {
         setEngineStatus('optimizing')
-        setEngineInfo({ backend: response.backend, loadMs: response.loadMs })
-        setNotice(`10-block 网络已加载，正在优化批量搜索内核…`)
         return
       }
 
       if (response.type === 'optimized') {
         setEngineStatus('ready')
-        setNotice(`小网络与 batch=${response.batchSize} 搜索内核已就绪`)
         return
       }
 
@@ -73,7 +56,7 @@ function App() {
         if (response.requestId !== undefined && response.requestId !== requestRef.current?.id) return
         requestRef.current = null
         setThinking(false)
-        setNotice(`小网络错误：${response.message}`)
+        setNotice('AI 暂时不可用，已切换为双人模式')
         setEngineStatus('error')
         setAiEnabled(false)
         return
@@ -83,17 +66,6 @@ function App() {
       if (!active || response.requestId !== active.id) return
       requestRef.current = null
       setThinking(false)
-      setSearchMeta({
-        elapsedMs: response.elapsedMs,
-        candidates: response.candidates,
-        backend: response.backend,
-        scoreLead: response.scoreLead,
-        visits: response.visits,
-        batches: response.batches,
-        treeReused: response.treeReused,
-        retainedVisits: response.retainedVisits,
-        principalVariation: response.principalVariation,
-      })
       setGame((current) => {
         if (hashBoard(current.position.board) !== active.hash || current.finished) return current
         const result = response.move === null ? passTurn(current) : playMove(current, response.move)
@@ -101,7 +73,7 @@ function App() {
           setNotice(result.reason ?? 'AI 返回了非法着法')
           return current
         }
-        setNotice(response.move === null ? 'MCTS 选择停一手' : `MCTS 搜索落子 ${formatPoint(response.move, current.position.size)}`)
+        setNotice(response.move === null ? 'AI 选择停一手' : `AI 落子 ${formatPoint(response.move, current.position.size)}`)
         return result.game
       })
     }
@@ -121,14 +93,13 @@ function App() {
     const hash = hashBoard(game.position.board)
     requestRef.current = { id: requestId, hash }
     setThinking(true)
-    setNotice(`KataGo 小网络正在搜索（${levelLabels[aiLevel]}）…`)
+    setNotice(`AI 正在思考（${levelLabels[aiLevel]}）…`)
     workerRef.current.postMessage({ type: 'search', requestId, game, level: aiLevel })
   }, [aiEnabled, aiLevel, engineStatus, game, isHumanTurn, thinking])
 
   function reset(nextSize = boardSize, nextHuman = humanColor) {
     requestRef.current = null
     setThinking(false)
-    setSearchMeta(null)
     setGame(createGame(nextSize))
     setNotice(nextHuman === 'black' || !aiEnabled ? '黑方先行，请落子' : 'AI 将执黑先行')
   }
@@ -155,9 +126,9 @@ function App() {
     if (game.history.length === 0) return
     requestRef.current = null
     setThinking(false)
-    const steps = aiEnabled && game.history.length >= 2 ? 2 : 1
+    const steps = aiEnabled && !thinking ? Math.min(2, game.history.length) : 1
     setGame((current) => undo(current, steps))
-    setNotice(`已悔 ${steps} 手`)
+    setNotice(steps === 2 ? '已撤回上一回合' : '已撤回上一手')
   }
 
   function changeBoardSize(size: number) {
@@ -173,6 +144,7 @@ function App() {
   const resultText = game.finished
     ? `${stoneLabels[score.winner]}胜 ${score.margin.toFixed(1)} 目`
     : `${stoneLabels[game.position.toPlay]}方行棋`
+  const canUndo = game.history.length > 0 && (!aiEnabled || thinking || game.history.length >= 2)
 
   return (
     <div className="app-shell">
@@ -182,16 +154,14 @@ function App() {
           <span><strong>弈境</strong><small>KATA GO SAI</small></span>
         </a>
         <div className="top-status">
-          <span className={`status-dot ${thinking || engineStatus === 'loading' ? 'animate-pulse' : ''}`} />
-          {engineStatus === 'loading'
-            ? '正在加载 10-block 网络'
-            : engineStatus === 'optimizing'
-              ? '正在优化 MCTS 搜索内核'
+          <span className={`status-dot ${thinking || engineStatus === 'loading' || engineStatus === 'optimizing' ? 'animate-pulse' : ''}`} />
+          {engineStatus === 'loading' || engineStatus === 'optimizing'
+            ? 'AI 准备中'
             : engineStatus === 'error'
-              ? 'KataGo 小网不可用'
+              ? 'AI 暂时不可用'
               : thinking
-                ? '小网络推理中'
-                : 'KataGo 小网已就绪'}
+                ? 'AI 思考中'
+                : '等待落子'}
         </div>
         <button className="new-game-button" type="button" onClick={() => reset()}>
           <NewIcon /> 新对局
@@ -219,7 +189,7 @@ function App() {
 
           <section className="setting-section">
             <div className="setting-heading">
-              <div><p className="eyebrow">对弈者</p><h2>KataGo 小网络</h2></div>
+              <div><p className="eyebrow">对弈者</p><h2>AI 对手</h2></div>
               <button
                 type="button"
                 role="switch"
@@ -232,14 +202,10 @@ function App() {
                 }}
               ><span /></button>
             </div>
-            <label className="field-label" htmlFor="ai-level">搜索预算</label>
+            <label className="field-label" htmlFor="ai-level">思考时间</label>
             <select id="ai-level" value={aiLevel} onChange={(event) => setAiLevel(event.target.value as AiLevel)} disabled={!aiEnabled}>
               {Object.entries(levelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
-            <div className="engine-note">
-              <SparkIcon />
-              <p><strong>10-block · 批量 PUCT/MCTS</strong><span>官方 KataGo 网络提供 policy 与 value，搜索在 Worker 内批量评估叶节点；更高 visits 更强，也需要更久。</span></p>
-            </div>
           </section>
 
           <section className="score-card">
@@ -255,7 +221,13 @@ function App() {
           </div>
           <GoBoard position={game.position} disabled={thinking || !isHumanTurn || game.finished} onPlay={handlePlay} />
           <div className="board-actions">
-            <button type="button" onClick={handleUndo} disabled={game.history.length === 0}><UndoIcon />悔棋</button>
+            <button
+              type="button"
+              className="undo-button"
+              onClick={handleUndo}
+              disabled={!canUndo}
+              title={aiEnabled ? '撤回你和 AI 的上一回合' : '撤回上一手'}
+            ><UndoIcon />悔棋</button>
             <div className="move-caption">{game.position.lastMoveWasPass ? '上一手：停一手' : game.position.lastMove !== null ? `上一手：${formatPoint(game.position.lastMove, boardSize)}` : '等待第一手'}</div>
             <button type="button" onClick={handlePass} disabled={thinking || !isHumanTurn || game.finished}><PassIcon />停一手</button>
           </div>
@@ -287,18 +259,6 @@ function App() {
             </div>
           </section>
 
-          <section className="runtime-card">
-            <span className="runtime-icon"><SparkIcon /></span>
-            <div>
-              <small>神经网络运行时</small>
-              <strong>{engineStatus === 'loading' ? '模型加载中…' : engineStatus === 'optimizing' ? 'batch=4 搜索内核预热中…' : engineStatus === 'error' ? '模型不可用' : `TensorFlow.js · ${engineInfo?.backend ?? 'ready'}`}</strong>
-              <p>{searchMeta
-                ? `搜索 ${searchMeta.elapsedMs.toFixed(0)}ms · ${searchMeta.visits} 新 visits/${searchMeta.batches} batches${searchMeta.treeReused ? ` · 复用 ${searchMeta.retainedVisits} visits` : ''} · ${searchMeta.scoreLead >= 0 ? 'AI 侧' : '人类侧'}预估领先 ${Math.abs(searchMeta.scoreLead).toFixed(1)} 目 · PV ${searchMeta.principalVariation.map((move) => formatPoint(move, boardSize)).join(' ') || '—'}`
-                : engineInfo
-                  ? `模型加载和预热用时 ${(engineInfo.loadMs / 1000).toFixed(1)}s`
-                  : '首次加载约 11 MB 权重，之后由浏览器缓存'}</p>
-            </div>
-          </section>
         </aside>
       </main>
     </div>

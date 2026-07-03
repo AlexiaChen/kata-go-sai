@@ -52,11 +52,6 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .switch.on span { transform: translateX(18px); }
 select { width: 100%; height: 39px; padding: 0 11px; color: #33463e; background: #f9faf6; border: 1px solid #ccd4cd; border-radius: 5px; font-size: 12px; outline: none; }
 select:focus { border-color: #47745f; box-shadow: 0 0 0 3px #47745f16; }
-.engine-note { display: flex; gap: 10px; margin-top: 13px; padding: 12px; color: #426253; background: #e1ebe4; border: 1px solid #cedfd4; border-radius: 5px; }
-.engine-note svg { width: 16px; flex: 0 0 auto; margin-top: 1px; }
-.engine-note p { display: flex; flex-direction: column; gap: 3px; margin: 0; }
-.engine-note strong { font-size: 10px; }
-.engine-note span { color: #6b7d73; font-size: 9px; line-height: 1.55; }
 .score-card { margin-top: 24px; padding: 14px; background: #f8f9f5aa; border: 1px solid #d8ded7; border-radius: 6px; }
 .score-card > div { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 9px; }
 .score-card > div + div { margin-top: 13px; padding-top: 13px; border-top: 1px solid #e0e4df; }
@@ -85,10 +80,12 @@ select:focus { border-color: #47745f; box-shadow: 0 0 0 3px #47745f16; }
 .board-actions button:last-child { justify-self: end; }
 .board-actions button:hover:not(:disabled) { color: #194a38; }
 .board-actions svg { width: 17px; }
+.board-actions .undo-button { justify-self: start; padding: 7px 11px; background: #f5f7f2; border: 1px solid #cdd6ce; border-radius: 5px; }
+.board-actions .undo-button:hover:not(:disabled) { background: #e7eee8; border-color: #aebfb2; }
 .move-caption { color: #8c9791; font-size: 9px; letter-spacing: .05em; }
 
 .right-panel { display: flex; flex-direction: column; gap: 18px; }
-.analysis-card, .history-card, .runtime-card { background: #f8f9f5c7; border: 1px solid #d4dbd4; border-radius: 6px; box-shadow: 0 5px 18px #2a3b3310; }
+.analysis-card, .history-card { background: #f8f9f5c7; border: 1px solid #d4dbd4; border-radius: 6px; box-shadow: 0 5px 18px #2a3b3310; }
 .analysis-card { padding: 18px; }
 .analysis-title { display: flex; align-items: center; justify-content: space-between; }
 .analysis-title svg { width: 15px; color: #839089; }
@@ -103,17 +100,9 @@ select:focus { border-color: #47745f; box-shadow: 0 0 0 3px #47745f16; }
 .empty-history { margin: 60px 15px; color: #9aa39e; font-size: 9px; line-height: 1.6; text-align: center; }
 .move-row { height: 31px; display: grid; grid-template-columns: 25px 19px 1fr; align-items: center; color: #7a8680; border-bottom: 1px solid #e6e9e5; font-size: 9px; }
 .move-row strong { color: #35443d; font-size: 10px; }
-.runtime-card { display: flex; gap: 11px; align-items: flex-start; padding: 14px; }
-.runtime-icon { width: 31px; height: 31px; display: grid; place-items: center; flex: 0 0 auto; color: #507b67; background: #e1ebe4; border-radius: 5px; }
-.runtime-icon svg { width: 16px; }
-.runtime-card div { display: flex; flex-direction: column; }
-.runtime-card small { color: #8b9690; font-size: 8px; }
-.runtime-card strong { margin-top: 2px; color: #35463e; font-size: 9px; }
-.runtime-card p { margin: 4px 0 0; color: #929b96; font-size: 8px; line-height: 1.4; }
-
 @media (max-width: 1120px) {
   .main-layout { grid-template-columns: 210px minmax(430px, 660px); gap: 28px; }
-  .right-panel { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); padding-top: 0; }
+  .right-panel { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-top: 0; }
 }
 
 @media (max-width: 760px) {
