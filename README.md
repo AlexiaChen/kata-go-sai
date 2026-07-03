@@ -59,13 +59,8 @@ src/
 └── styles.css           # Tailwind CSS 入口与视觉样式
 ```
 
-## 三个参考项目如何分工
+## 模型网络
 
-| 项目 | 可复用部分 | 不应直接照搬的部分 |
-|---|---|---|
-| `chinese-chess` | Vite/CI/Pages、Worker 隔离、Phaser 生命周期、引擎桥接分层 | NNUE 是增量全连接评估，计算模型与围棋卷积网络不同 |
-| `KataGo` | 围棋规则、特征、policy/value、MCTS 和 GTP/analysis 语义 | 官方后端依赖 CUDA/OpenCL/TensorRT/Eigen，不能直接编译成高性能浏览器 WASM |
-| `maksimKorzh/go` | 小模型 + TF.js/WebGL 的纯前端可行性 | 裸网络无 MCTS，README 标称约 5 级/业余 1 段，不是职业棋力 |
 
 模型文件来自参考项目，原始网络列于 [KataGo 官方训练站](https://katagotraining.org/networks/)，许可声明保存在 `public/models/dan/LICENSE.txt`。
 
