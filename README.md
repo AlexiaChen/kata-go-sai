@@ -4,6 +4,8 @@
 
 当前网络是 `kata1-b10c128-s1141046784-d204142634`，三个权重分片约 11.4 MB。Worker 使用网络的 policy、value 和目差输出执行批量 PUCT/MCTS，而不是直接选择 policy 最大点。它仍是 4/12/24 visits 的浏览器受限搜索，不等同于完整 KataGo，也不宣称职业棋力。
 
+[在线试玩](https://alexiachen.github.io/kata-go-sai/)
+
 ## 当前能力
 
 - 9、13、19 路棋盘，Phaser Canvas/WebGL 渲染
