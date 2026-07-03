@@ -4,7 +4,7 @@ This file defines the working contract for coding agents in `kata-go-sai`.
 
 ## Project intent
 
-Build a browser-first Go/Weiqi application. The deployed static app must remain usable without a server. The current browser engine runs an official KataGo 10-block network as a raw policy network. Do not imply that raw policy inference includes KataGo MCTS or has professional strength.
+Build a browser-first Go/Weiqi application. The deployed static app must remain usable without a server. The current browser engine combines an official KataGo 10-block network with a low-visit batched PUCT/MCTS. Do not equate this simplified 4/12/24-visit search with full KataGo or claim professional strength without match evidence.
 
 ## Required checks
 
@@ -12,6 +12,7 @@ Before handing off a change, run:
 
 ```bash
 npm test
+npm run verify:model
 npm run build
 VITE_BASE_PATH=/kata-go-sai/ npm run build
 git diff --check
@@ -56,20 +57,20 @@ Keep `rules.ts` data serializable with structured clone so it can cross a Worker
 
 ## AI and model work
 
-The current bot is `kata1-b10c128-s1141046784-d204142634`, converted to a TensorFlow.js GraphModel and executed with WebGL inside a Worker. `kataFeatures.ts` is responsible for its 22 spatial and 19 global features. Preserve named model inputs/outputs, tensor disposal, explicit initialization, and visible error states.
+The current bot is `kata1-b10c128-s1141046784-d204142634`, converted to a TensorFlow.js GraphModel and executed with WebGL inside a Worker. `kataFeatures.ts` is responsible for its 22 spatial and 19 global features, including ladder channels 14-17. Preserve named model inputs/outputs, current-player value perspective, tensor disposal, explicit initialization, and visible error states.
 
-The current default `careful` mode must select the highest-policy legal move. Do not silently replace model failures with heuristic play. A failure must be visible and the board must remain usable in two-player mode.
+`mcts.ts` owns batched PUCT selection, virtual loss, value backpropagation, root symmetry pruning, principal variation, and tree reuse. The three budgets are 4/12/24 new visits unless a measured change justifies different defaults. Do not silently replace model failures with heuristic play. A failure must be visible and the board must remain usable in two-player mode.
 
-Preferred long-term split:
+Current and preferred long-term split:
 
-- Rust/WASM: rules, feature encoding, Zobrist hashing, MCTS/PUCT, tree reuse, and compact memory management.
+- TypeScript currently owns rules, feature encoding and MCTS. Rust/WASM is a future option for search-tree memory and control flow only after profiling demonstrates material benefit.
 - TensorFlow.js WebGL is the measured current backend; WebGPU/ONNX Runtime Web may replace it only after comparative measurements.
 - Web Worker: orchestration and isolation from rendering.
 - Remote KataGo analysis service: optional high-strength mode, with local fallback.
 
 Do not assume rewriting tensor inference in Rust/WASM makes it faster. Record model download size, startup time, peak memory, single-evaluation latency, visits per second, and device/backend before choosing an implementation.
 
-Model strength claims require a reproducible match setup. In particular, do not describe the 4–11 MB raw networks from the reference PWA as professional strength; its own README estimates roughly 5 kyu and amateur 1 dan without MCTS.
+Model strength claims require a reproducible match setup. In particular, do not describe either the raw reference PWA or this low-visit browser search as professional strength. Record opponent, colors, rules, visits/time, hardware, backend, game count and confidence interval.
 
 ## UI conventions
 
@@ -85,6 +86,7 @@ Model strength claims require a reproducible match setup. In particular, do not 
 - Do not commit `node_modules`, `dist`, coverage, Vite-emitted config files, or `*.tsbuildinfo`.
 - Prefer a small dependency surface. Phaser, React, TensorFlow.js, Vite, and Tailwind are deliberate choices; justify additional runtime packages.
 - Keep the GitHub Pages base path configurable through `VITE_BASE_PATH`.
+- Keep `public/models/dan/SHA256SUMS` in sync with intentional model asset changes. CI and Pages must verify the model before building.
 
 ## Reference projects
 

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "verify:model": "sha256sum -c public/models/dan/SHA256SUMS",
     "test": "vitest run",
     "test:watch": "vitest"
   },

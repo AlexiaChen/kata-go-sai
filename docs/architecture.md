@@ -7,10 +7,10 @@ Vite 可以直接构建 React，本项目已使用 React + Vite + Tailwind CSS 4
 建议把问题分成三层：
 
 1. React 管理对局状态、设置、棋谱和分析展示；Phaser 只管理棋盘渲染与指针交互。
-2. Rust/WASM 管理高频规则、特征编码、MCTS 树和内存布局。
+2. Worker 管理规则、特征编码、MCTS 树和批量调度；只有性能剖析证明有收益后再把控制逻辑迁移到 Rust/WASM。
 3. 神经网络张量计算优先使用 WebGPU；WASM SIMD 作为兼容回退，而不是唯一后端。
 
-当前仓库已经实现第 1 层、可替换的 Worker 协议，以及 TensorFlow.js/WebGL 10-block 裸网络推理。Rust/WASM MCTS 和远端原生 KataGo 仍是后续阶段。
+当前仓库已经实现 React/Phaser 界面、可替换的 Worker 协议、TensorFlow.js/WebGL 10-block 批量推理，以及 TypeScript PUCT/MCTS。搜索包含树复用、虚拟损失、根节点对称裁剪和 14–17 征子输入特征。Rust/WASM 搜索和远端原生 KataGo 是可选后续阶段。
 
 ## 2. 三个项目的原理差异
 
@@ -40,7 +40,7 @@ KataGo 不是 NNUE。它以多层卷积/残差网络同时输出 policy、胜率
 
 ## 3. 推荐的渐进式推理方案
 
-### A. 纯静态、裸小网（当前已实现）
+### A. 纯静态、裸小网（参考基线）
 
 - 模型：6-block 或 10-block，4–11 MB 量级；
 - 后端：当前为 TensorFlow.js WebGL；后续可对比 ONNX Runtime Web/WebGPU；
@@ -49,15 +49,15 @@ KataGo 不是 NNUE。它以多层卷积/残差网络同时输出 policy、胜率
 
 这是 GitHub Pages 最容易稳定交付的版本。
 
-### B. 纯静态、小网 + 受限 MCTS
+### B. 纯静态、小网 + 受限 MCTS（当前实现）
 
-- Rust/WASM：棋盘、合法性、Zobrist 哈希、特征编码、PUCT、树复用；
-- JavaScript/WebGPU：网络加载、批量推理；
-- Worker：Rust 搜索通过窄消息协议驱动 JS 推理；
-- 搜索预算：先从 32/64/128 visits 做设备基准，再动态调节；
+- TypeScript：棋盘、合法性、特征编码、PUCT、树复用和根节点对称裁剪；
+- TensorFlow.js/WebGL：网络加载和 batch=4 推理；
+- Worker：搜索和张量执行均与 UI 线程隔离；
+- 搜索预算：当前为 4/12/24 visits，并受 4/8/16 秒硬上限约束；
 - 目标：明显强于裸网络，但实际棋力必须通过固定硬件和对局集测量。
 
-这里推荐 Rust/WASM 的是搜索和规则，而不是先手写一套 Rust CPU 卷积算子。模型执行交给浏览器 WebGPU，通常能更好地利用设备。
+Rust/WASM 仍适合搜索树和规则，但目前总耗时由卷积推理主导。先手写 Rust CPU 卷积不会自动变快；后续应先实测 WebGPU/ONNX Runtime Web，再决定迁移边界。
 
 ### C. 远端完整 KataGo
 
@@ -77,8 +77,9 @@ React / Phaser
       │ GameState + search budget
       ▼
 Engine Worker
-      ├── TensorFlow.js 10-block 裸网络（当前）
-      ├── Rust/WASM MCTS + WebGPU model（规划）
+      ├── TypeScript 批量 PUCT/MCTS（当前）
+      ├── TensorFlow.js 10-block policy/value（当前）
+      ├── Rust/WASM 搜索 + WebGPU model（候选）
       └── remote KataGo analysis client
 ```
 
@@ -95,9 +96,11 @@ Engine Worker
 
 - 首次模型下载大小、解压后内存、冷启动时间；
 - 9/13/19 路单次 batch=1 推理延迟；
-- 64/128 visits 总耗时与 UI 帧率；
+- 4/12/24 visits 总耗时、有效 visits/s 与 UI 帧率；
 - Chrome WebGPU、Safari WebGPU、无 WebGPU 回退行为；
 - 连续 20 盘后的内存是否稳定；
 - 对固定 GTP 对手的 Elo/胜率，而不是用模型大小推断棋力。
 
-当前在无头 Chromium WebGL 环境中的一次开发态测量为：首次下载、加载和 shader 预热约 10.8 秒，预热后单次 19 路推理约 0.53 秒。该数字只用于证明交互可行，不代表所有设备；生产部署和真实 GPU/移动设备仍需分别测量。
+当前在无头 Chromium WebGL 环境中的一次开发态测量为：模型加载加 batch=1/batch=4 shader 预热约 14.8 秒；预热后 4/12/24 visits 搜索约 2.4/6.6/12.3 秒。batch=4 明显优于逐叶串行推理，但该数字不代表所有设备；生产部署和真实 GPU/移动设备仍需分别测量。
+
+当前 PUCT 是面向浏览器低预算的简化实现，并非逐行移植 KataGo 搜索。它未包含 KataGo 的 score utility、LCB、图搜索、子树价值偏差修正等高级机制。是否增强这些机制，应以固定 GTP 对手的胜率回归为依据。

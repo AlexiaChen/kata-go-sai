@@ -2,15 +2,17 @@
 
 一个面向浏览器的围棋项目。前端使用 React、TypeScript、Tailwind CSS、Vite 和 Phaser 3；KataGo 10-block 小网络通过 TensorFlow.js/WebGL 在本地推理，可直接部署到 GitHub Pages。
 
-当前网络是 `kata1-b10c128-s1141046784-d204142634`，三个权重分片约 11.4 MB。它直接使用 policy 选点，不含 MCTS；参考项目标称约 OGS 业余 1 段，不应描述为职业棋力。
+当前网络是 `kata1-b10c128-s1141046784-d204142634`，三个权重分片约 11.4 MB。Worker 使用网络的 policy、value 和目差输出执行批量 PUCT/MCTS，而不是直接选择 policy 最大点。它仍是 4/12/24 visits 的浏览器受限搜索，不等同于完整 KataGo，也不宣称职业棋力。
 
 ## 当前能力
 
 - 9、13、19 路棋盘，Phaser Canvas/WebGL 渲染
 - 提子、禁入点、位置全局同形禁着、停一手、悔棋
 - 双方连续停一手后结束，中国规则面积计分
-- 人机/双人模式、选择执黑或执白、三档 policy 选择方式
-- 22 路 KataGo 特征编码、10-block 网络、WebGL 推理
+- 人机/双人模式、选择执黑或执白、三档 4/12/24 visits 搜索预算
+- 22 路 KataGo 特征编码，包括当前与历史征子特征
+- 批量 PUCT/MCTS、根节点对称裁剪、主变化和跨回合搜索树复用
+- 10-block 网络、TensorFlow.js WebGL 批量推理
 - 模型加载和推理在 Web Worker 中运行，不阻塞 React UI
 - 响应式桌面与移动端布局
 - Vitest 规则测试、GitHub Actions CI、GitHub Pages 自动部署
@@ -28,6 +30,7 @@ npm run dev
 
 ```bash
 npm test
+npm run verify:model
 npm run build
 npm run preview
 ```
@@ -45,7 +48,7 @@ make pages-build
 ```text
 src/
 ├── components/          # React 控制组件与 Phaser 容器
-├── engine/              # KataGo 特征、TensorFlow.js Worker 及消息协议
+├── engine/              # KataGo 特征、征子、MCTS、TensorFlow.js Worker
 ├── game/
 │   ├── boardScene.ts    # Phaser 棋盘场景
 │   ├── rules.ts         # 纯 TypeScript 围棋规则与计分
@@ -63,5 +66,13 @@ src/
 | `maksimKorzh/go` | 小模型 + TF.js/WebGL 的纯前端可行性 | 裸网络无 MCTS，README 标称约 5 级/业余 1 段，不是职业棋力 |
 
 模型文件来自参考项目，原始网络列于 [KataGo 官方训练站](https://katagotraining.org/networks/)，许可声明保存在 `public/models/dan/LICENSE.txt`。
+
+这套 10-block 是 KataGo 官方归档中的最终 Extended Training b10c128；官方将 b10/b15 定位为更快、但配合原生搜索仍可达到职业以上的旧小网。该判断不适用于本项目仅 4/12/24 visits 的简化浏览器搜索。2026 年主训练站的新网络已是 b28/b40 量级，适合 PC GPU，不适合当前静态 Pages 包体与等待目标。
+
+模型 JSON、三个权重分片、来源和许可证都已纳入 Git。CI/Pages 在构建前执行 `SHA256SUMS` 校验，因此线上部署使用的就是仓库内这套 10-block 网络，不依赖运行时下载 GitHub Release 或外部模型站。
+
+## 浏览器搜索边界
+
+开发环境的无头 Chromium WebGL 基准中，batch=4 预热后，4/12/24 visits 分别约 2.4/6.6/12.3 秒；首次模型加载和 shader 预热约 14.8 秒。实际速度取决于浏览器和 GPU。受限 MCTS 会比裸 policy 更能利用 value 纠错，但 24 visits 仍远低于桌面 KataGo 的常用预算，棋力需要通过固定对手对局测量，不能从模型大小或单盘观感推断。
 
 详细原理、性能边界和 Rust/WASM 方案见 [架构说明](docs/architecture.md)；Web 与 WSL 模型选择见[模型和后端建议](docs/models-and-backends.md)。

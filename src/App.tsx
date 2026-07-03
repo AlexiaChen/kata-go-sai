@@ -7,9 +7,9 @@ import { createGame, formatPoint, hashBoard, other, passTurn, playMove, scoreChi
 import type { GameState, Stone } from './game/types'
 
 const levelLabels: Record<AiLevel, string> = {
-  fast: '多样（前五选点）',
-  balanced: '稳健（前三选点）',
-  careful: '最强（策略首选）',
+  fast: '快速 · 约 3 秒',
+  balanced: '均衡 · 约 8 秒',
+  careful: '深入 · 约 15 秒',
 }
 
 const stoneLabels: Record<Stone, string> = { black: '黑', white: '白' }
@@ -19,9 +19,14 @@ interface SearchMeta {
   candidates: number
   backend: string
   scoreLead: number
+  visits: number
+  batches: number
+  treeReused: boolean
+  retainedVisits: number
+  principalVariation: Array<number | null>
 }
 
-type EngineStatus = 'loading' | 'ready' | 'error'
+type EngineStatus = 'loading' | 'optimizing' | 'ready' | 'error'
 
 function App() {
   const [boardSize, setBoardSize] = useState(19)
@@ -52,9 +57,15 @@ function App() {
       const response = event.data
 
       if (response.type === 'ready') {
-        setEngineStatus('ready')
+        setEngineStatus('optimizing')
         setEngineInfo({ backend: response.backend, loadMs: response.loadMs })
-        setNotice(`10-block 小网络已就绪（${response.backend}）`)
+        setNotice(`10-block 网络已加载，正在优化批量搜索内核…`)
+        return
+      }
+
+      if (response.type === 'optimized') {
+        setEngineStatus('ready')
+        setNotice(`小网络与 batch=${response.batchSize} 搜索内核已就绪`)
         return
       }
 
@@ -77,6 +88,11 @@ function App() {
         candidates: response.candidates,
         backend: response.backend,
         scoreLead: response.scoreLead,
+        visits: response.visits,
+        batches: response.batches,
+        treeReused: response.treeReused,
+        retainedVisits: response.retainedVisits,
+        principalVariation: response.principalVariation,
       })
       setGame((current) => {
         if (hashBoard(current.position.board) !== active.hash || current.finished) return current
@@ -85,7 +101,7 @@ function App() {
           setNotice(result.reason ?? 'AI 返回了非法着法')
           return current
         }
-        setNotice(response.move === null ? '小网络选择停一手' : `小网络落子 ${formatPoint(response.move, current.position.size)}`)
+        setNotice(response.move === null ? 'MCTS 选择停一手' : `MCTS 搜索落子 ${formatPoint(response.move, current.position.size)}`)
         return result.game
       })
     }
@@ -105,7 +121,7 @@ function App() {
     const hash = hashBoard(game.position.board)
     requestRef.current = { id: requestId, hash }
     setThinking(true)
-    setNotice('KataGo 10-block 小网络正在推理…')
+    setNotice(`KataGo 小网络正在搜索（${levelLabels[aiLevel]}）…`)
     workerRef.current.postMessage({ type: 'search', requestId, game, level: aiLevel })
   }, [aiEnabled, aiLevel, engineStatus, game, isHumanTurn, thinking])
 
@@ -169,6 +185,8 @@ function App() {
           <span className={`status-dot ${thinking || engineStatus === 'loading' ? 'animate-pulse' : ''}`} />
           {engineStatus === 'loading'
             ? '正在加载 10-block 网络'
+            : engineStatus === 'optimizing'
+              ? '正在优化 MCTS 搜索内核'
             : engineStatus === 'error'
               ? 'KataGo 小网不可用'
               : thinking
@@ -214,13 +232,13 @@ function App() {
                 }}
               ><span /></button>
             </div>
-            <label className="field-label" htmlFor="ai-level">策略选择</label>
+            <label className="field-label" htmlFor="ai-level">搜索预算</label>
             <select id="ai-level" value={aiLevel} onChange={(event) => setAiLevel(event.target.value as AiLevel)} disabled={!aiEnabled}>
               {Object.entries(levelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
             <div className="engine-note">
               <SparkIcon />
-              <p><strong>10-block · 约 11 MB</strong><span>官方 KataGo 网络通过 TensorFlow.js 在本机推理；当前直接使用 policy，不含 MCTS，参考棋力约业余初段。</span></p>
+              <p><strong>10-block · 批量 PUCT/MCTS</strong><span>官方 KataGo 网络提供 policy 与 value，搜索在 Worker 内批量评估叶节点；更高 visits 更强，也需要更久。</span></p>
             </div>
           </section>
 
@@ -273,9 +291,9 @@ function App() {
             <span className="runtime-icon"><SparkIcon /></span>
             <div>
               <small>神经网络运行时</small>
-              <strong>{engineStatus === 'loading' ? '模型加载与预热中…' : engineStatus === 'error' ? '模型不可用' : `TensorFlow.js · ${engineInfo?.backend ?? 'ready'}`}</strong>
+              <strong>{engineStatus === 'loading' ? '模型加载中…' : engineStatus === 'optimizing' ? 'batch=4 搜索内核预热中…' : engineStatus === 'error' ? '模型不可用' : `TensorFlow.js · ${engineInfo?.backend ?? 'ready'}`}</strong>
               <p>{searchMeta
-                ? `推理 ${searchMeta.elapsedMs.toFixed(0)}ms · ${searchMeta.candidates} 个合法点 · ${searchMeta.scoreLead >= 0 ? 'AI 侧' : '人类侧'}预估领先 ${Math.abs(searchMeta.scoreLead).toFixed(1)} 目`
+                ? `搜索 ${searchMeta.elapsedMs.toFixed(0)}ms · ${searchMeta.visits} 新 visits/${searchMeta.batches} batches${searchMeta.treeReused ? ` · 复用 ${searchMeta.retainedVisits} visits` : ''} · ${searchMeta.scoreLead >= 0 ? 'AI 侧' : '人类侧'}预估领先 ${Math.abs(searchMeta.scoreLead).toFixed(1)} 目 · PV ${searchMeta.principalVariation.map((move) => formatPoint(move, boardSize)).join(' ') || '—'}`
                 : engineInfo
                   ? `模型加载和预热用时 ${(engineInfo.loadMs / 1000).toFixed(1)}s`
                   : '首次加载约 11 MB 权重，之后由浏览器缓存'}</p>

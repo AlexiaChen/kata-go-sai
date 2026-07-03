@@ -36,4 +36,24 @@ describe('KataGo feature encoder', () => {
     expect(features.globalInputs[7]).toBe(0.5)
     expect(features.globalInputs[14]).toBe(1)
   })
+
+  it('encodes ladder-captured stones and attacker working moves', () => {
+    const game = createGame(9)
+    const board = [...game.position.board]
+    const point = (x: number, y: number) => y * 9 + x
+    board[point(4, 4)] = 'white'
+    ;[
+      point(3, 4), point(5, 4),
+      point(3, 3), point(4, 2), point(5, 3),
+      point(3, 5), point(4, 6), point(5, 5),
+    ].forEach((black) => { board[black] = 'black' })
+    game.position.board = board
+    game.position.toPlay = 'black'
+
+    const features = encodeKataFeatures(game)
+    const nnPoint = (x: number, y: number) => y * NN_BOARD_SIZE + x
+    expect(featureAt(features.binInputs, nnPoint(4, 4), 14)).toBe(1)
+    expect(featureAt(features.binInputs, nnPoint(4, 3), 17)).toBe(1)
+    expect(featureAt(features.binInputs, nnPoint(4, 5), 17)).toBe(1)
+  })
 })

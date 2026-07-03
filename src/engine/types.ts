@@ -23,6 +23,12 @@ export interface AiReadyResponse {
   modelName: string
 }
 
+export interface AiOptimizedResponse {
+  type: 'optimized'
+  batchSize: number
+  warmupMs: number
+}
+
 export interface AiResultResponse {
   type: 'result'
   requestId: number
@@ -31,6 +37,17 @@ export interface AiResultResponse {
   elapsedMs: number
   backend: string
   scoreLead: number
+  visits: number
+  batches: number
+  treeReused: boolean
+  retainedVisits: number
+  principalVariation: Array<Point | null>
+  rootCandidates: Array<{
+    move: Point | null
+    visits: number
+    value: number
+    prior: number
+  }>
 }
 
 export interface AiErrorResponse {
@@ -39,4 +56,4 @@ export interface AiErrorResponse {
   message: string
 }
 
-export type AiResponse = AiReadyResponse | AiResultResponse | AiErrorResponse
+export type AiResponse = AiReadyResponse | AiOptimizedResponse | AiResultResponse | AiErrorResponse

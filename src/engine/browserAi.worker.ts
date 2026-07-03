@@ -2,19 +2,52 @@
 
 import * as tf from '@tensorflow/tfjs'
 
-import { createGame, playMove } from '../game/rules'
-import type { GameState, Point } from '../game/types'
+import { createGame } from '../game/rules'
+import type { GameState } from '../game/types'
 import { encodeKataFeatures, GLOBAL_FEATURES, NN_BOARD_SIZE, SPATIAL_FEATURES } from './kataFeatures'
+import { MctsSession, type MctsConfig, type NetworkEvaluation } from './mcts'
 import type { AiLevel, AiRequest, AiResponse } from './types'
 
 const MODEL_NAME = 'kata1-b10c128-s1141046784-d204142634'
 const POLICY_OUTPUT = 'swa_model/policy_output'
 const MISC_OUTPUT = 'swa_model/miscvalues_output'
+const VALUE_OUTPUT = 'swa_model/value_output'
+const POLICY_STRIDE = 2 * (NN_BOARD_SIZE * NN_BOARD_SIZE + 1)
+const MISC_STRIDE = 10
+const VALUE_STRIDE = 3
 const scope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope
+
+const SEARCH_CONFIGS: Record<AiLevel, MctsConfig> = {
+  fast: {
+    maxVisits: 4,
+    maxTimeMs: 4_000,
+    batchSize: 4,
+    cpuct: 1,
+    fpuReduction: 0.1,
+    rootSymmetryPruning: true,
+  },
+  balanced: {
+    maxVisits: 12,
+    maxTimeMs: 8_000,
+    batchSize: 4,
+    cpuct: 1,
+    fpuReduction: 0.1,
+    rootSymmetryPruning: true,
+  },
+  careful: {
+    maxVisits: 24,
+    maxTimeMs: 16_000,
+    batchSize: 4,
+    cpuct: 1,
+    fpuReduction: 0.1,
+    rootSymmetryPruning: true,
+  },
+}
 
 let model: tf.GraphModel | null = null
 let backend = 'uninitialized'
 let initializing: Promise<void> | null = null
+const searchSession = new MctsSession(evaluateGames)
 
 scope.onmessage = (event: MessageEvent<AiRequest>) => {
   const request = event.data
@@ -32,8 +65,8 @@ async function initialize(modelUrl: string): Promise<void> {
   backend = await selectBackend()
   model = await tf.loadGraphModel(modelUrl)
 
-  // Compile shaders and allocate reusable backend resources before the first move.
-  await executeNetwork(encodeKataFeatures(createGame(19)))
+  // Compile the single-position root evaluation before the first move.
+  await executeNetworkBatch([encodeKataFeatures(createGame(19))])
 
   const response: AiResponse = {
     type: 'ready',
@@ -42,6 +75,15 @@ async function initialize(modelUrl: string): Promise<void> {
     modelName: MODEL_NAME,
   }
   scope.postMessage(response)
+
+  const warmupStartedAt = performance.now()
+  const emptyFeatures = encodeKataFeatures(createGame(19))
+  await executeNetworkBatch([emptyFeatures, emptyFeatures, emptyFeatures, emptyFeatures])
+  scope.postMessage({
+    type: 'optimized',
+    batchSize: 4,
+    warmupMs: performance.now() - warmupStartedAt,
+  } satisfies AiResponse)
 }
 
 async function selectBackend(): Promise<string> {
@@ -66,27 +108,21 @@ async function search(requestId: number, game: GameState, level: AiLevel): Promi
     if (initializing) await initializing
     if (!model) throw new Error('KataGo 小网络尚未加载')
 
-    const { policy, misc } = await executeNetwork(encodeKataFeatures(game))
-    const ranked: Array<{ move: Point | null; score: number }> = []
-    const { size, board } = game.position
-    for (let point = 0; point < board.length; point += 1) {
-      if (board[point] !== null || !playMove(game, point).ok) continue
-      const x = point % size
-      const y = Math.floor(point / size)
-      ranked.push({ move: point, score: policy[y * NN_BOARD_SIZE + x] })
-    }
-    ranked.push({ move: null, score: policy[NN_BOARD_SIZE * NN_BOARD_SIZE] })
-    ranked.sort((left, right) => right.score - left.score)
-
-    const move = selectMove(ranked, level, game.position.moveNumber)
+    const result = await searchSession.search(game, SEARCH_CONFIGS[level])
     const response: AiResponse = {
       type: 'result',
       requestId,
-      move,
-      candidates: Math.max(0, ranked.length - 1),
+      move: result.move,
+      candidates: result.legalMoves,
       elapsedMs: performance.now() - startedAt,
       backend,
-      scoreLead: Number.isFinite(misc[2]) ? misc[2] * 20 : 0,
+      scoreLead: result.scoreLead,
+      visits: result.visits,
+      batches: result.batches,
+      treeReused: result.treeReused,
+      retainedVisits: result.retainedVisits,
+      principalVariation: result.principalVariation,
+      rootCandidates: result.candidates,
     }
     scope.postMessage(response)
   } catch (error) {
@@ -94,28 +130,29 @@ async function search(requestId: number, game: GameState, level: AiLevel): Promi
   }
 }
 
-function selectMove(
-  ranked: Array<{ move: Point | null; score: number }>,
-  level: AiLevel,
-  moveNumber: number,
-): Point | null {
-  if (ranked.length === 0) return null
-  if (level === 'careful') return ranked[0].move
-  const breadth = level === 'fast' ? 5 : moveNumber < 12 ? 3 : 2
-  return ranked[Math.floor(Math.random() * Math.min(breadth, ranked.length))].move
+async function evaluateGames(games: GameState[]): Promise<NetworkEvaluation[]> {
+  return executeNetworkBatch(games.map(encodeKataFeatures))
 }
 
-async function executeNetwork(features: ReturnType<typeof encodeKataFeatures>): Promise<{
-  policy: Float32Array
-  misc: Float32Array
-}> {
+async function executeNetworkBatch(
+  featureBatch: Array<ReturnType<typeof encodeKataFeatures>>,
+): Promise<NetworkEvaluation[]> {
   if (!model) throw new Error('KataGo 小网络尚未加载')
+  const batchSize = featureBatch.length
+  const spatialLength = NN_BOARD_SIZE * NN_BOARD_SIZE * SPATIAL_FEATURES
+  const binInputs = new Float32Array(batchSize * spatialLength)
+  const globalInputs = new Float32Array(batchSize * GLOBAL_FEATURES)
+  featureBatch.forEach((features, index) => {
+    binInputs.set(features.binInputs, index * spatialLength)
+    globalInputs.set(features.globalInputs, index * GLOBAL_FEATURES)
+  })
+
   const binTensor = tf.tensor(
-    features.binInputs,
-    [1, NN_BOARD_SIZE * NN_BOARD_SIZE, SPATIAL_FEATURES],
+    binInputs,
+    [batchSize, NN_BOARD_SIZE * NN_BOARD_SIZE, SPATIAL_FEATURES],
     'float32',
   )
-  const globalTensor = tf.tensor(features.globalInputs, [1, GLOBAL_FEATURES], 'float32')
+  const globalTensor = tf.tensor(globalInputs, [batchSize, GLOBAL_FEATURES], 'float32')
   let outputs: tf.Tensor[] = []
   try {
     const result = await model.executeAsync(
@@ -123,17 +160,37 @@ async function executeNetwork(features: ReturnType<typeof encodeKataFeatures>): 
         'swa_model/bin_inputs': binTensor,
         'swa_model/global_inputs': globalTensor,
       },
-      [POLICY_OUTPUT, MISC_OUTPUT],
+      [POLICY_OUTPUT, MISC_OUTPUT, VALUE_OUTPUT],
     )
     outputs = result as tf.Tensor[]
-    const policy = Float32Array.from(await outputs[0].data())
-    const misc = Float32Array.from(await outputs[1].data())
-    return { policy: policy.slice(0, 362), misc }
+    const policyData = Float32Array.from(await outputs[0].data())
+    const miscData = Float32Array.from(await outputs[1].data())
+    const valueData = Float32Array.from(await outputs[2].data())
+
+    return featureBatch.map((_, index) => ({
+      policyLogits: policyData.slice(
+        index * POLICY_STRIDE,
+        index * POLICY_STRIDE + NN_BOARD_SIZE * NN_BOARD_SIZE + 1,
+      ),
+      value: winLossValue(valueData, index * VALUE_STRIDE),
+      scoreLead: Number.isFinite(miscData[index * MISC_STRIDE + 2])
+        ? miscData[index * MISC_STRIDE + 2] * 20
+        : 0,
+    }))
   } finally {
     binTensor.dispose()
     globalTensor.dispose()
     tf.dispose(outputs)
   }
+}
+
+function winLossValue(values: Float32Array, offset: number): number {
+  // With positional superko and area scoring KataGo suppresses no-result,
+  // so normalize the current-player win and loss logits directly.
+  const maximum = Math.max(values[offset], values[offset + 1])
+  const win = Math.exp(values[offset] - maximum)
+  const loss = Math.exp(values[offset + 1] - maximum)
+  return (win - loss) / (win + loss)
 }
 
 function postError(error: unknown, requestId?: number): void {

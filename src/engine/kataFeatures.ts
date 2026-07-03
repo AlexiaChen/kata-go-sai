@@ -1,5 +1,6 @@
 import { collectGroup, neighbors, other, playMove } from '../game/rules'
 import type { GameState, Point, Stone } from '../game/types'
+import { findLadderGroups } from './ladder'
 
 export const NN_BOARD_SIZE = 19
 export const SPATIAL_FEATURES = 22
@@ -62,6 +63,13 @@ export function encodeKataFeatures(game: GameState): KataFeatures {
     }
   }
 
+  // Features 14-17: inescapable ladders in the current and two recent boards.
+  const previousPosition = game.history.at(-1) ?? position
+  const previousPreviousPosition = game.history.at(-2) ?? previousPosition
+  addLadderFeatures(binInputs, position.board, size, 14, toPlay)
+  addLadderFeatures(binInputs, previousPosition.board, size, 15, toPlay)
+  addLadderFeatures(binInputs, previousPreviousPosition.board, size, 16, toPlay)
+
   // Features 18-19: current Chinese-area ownership estimate.
   const area = estimateArea(board, size)
   area.forEach((owner, point) => {
@@ -78,6 +86,21 @@ export function encodeKataFeatures(game: GameState): KataFeatures {
   globalInputs[15] = komiParityWave(selfKomi, size * size)
 
   return { binInputs, globalInputs }
+}
+
+function addLadderFeatures(
+  buffer: Float32Array,
+  board: Array<Stone | null>,
+  size: number,
+  feature: 14 | 15 | 16,
+  toPlay: Stone,
+): void {
+  findLadderGroups(board, size).forEach(({ stones, workingMoves }) => {
+    stones.forEach((point) => setSpatial(buffer, nnPoint(point, size), feature))
+    if (feature === 14 && board[stones[0]] === other(toPlay) && workingMoves.length > 0) {
+      workingMoves.forEach((point) => setSpatial(buffer, nnPoint(point, size), 17))
+    }
+  })
 }
 
 function estimateArea(board: Array<Stone | null>, size: number): Array<Stone | null> {
