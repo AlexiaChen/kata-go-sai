@@ -2,7 +2,7 @@
 
 一个面向浏览器的围棋项目。前端使用 React、TypeScript、Tailwind CSS、Vite 和 Phaser 3；KataGo 10-block 小网络通过 TensorFlow.js/WebGL 在本地推理，可直接部署到 GitHub Pages。
 
-当前网络是 `kata1-b10c128-s1141046784-d204142634`，三个权重分片约 11.4 MB。Worker 使用网络的 policy、value 和目差输出执行批量 PUCT/MCTS，而不是直接选择 policy 最大点。它仍是 4/12/24 visits 的浏览器受限搜索，不等同于完整 KataGo，也不宣称职业棋力。
+当前网络是 `kata1-b10c128-s1141046784-d204142634`，三个权重分片约 11.4 MB。Worker 使用网络的 policy、value 和目差输出执行批量 PUCT/MCTS，并用轻量 score utility 与动态 FPU 改善低访问数下的选点，而不是直接选择 policy 最大点。它仍是 4/12/24 visits 的浏览器受限搜索，不等同于完整 KataGo，也不宣称职业棋力。
 
 [在线试玩](https://alexiachen.github.io/kata-go-sai/)
 
@@ -70,6 +70,6 @@ src/
 
 ## 浏览器搜索边界
 
-开发环境的无头 Chromium WebGL 基准中，batch=4 预热后，4/12/24 visits 分别约 2.4/6.6/12.3 秒；首次模型加载和 shader 预热约 14.8 秒。实际速度取决于浏览器和 GPU。受限 MCTS 会比裸 policy 更能利用 value 纠错，但 24 visits 仍远低于桌面 KataGo 的常用预算，棋力需要通过固定对手对局测量，不能从模型大小或单盘观感推断。
+开发环境的无头 Chromium WebGL 基准中，batch=4 预热后，4/12/24 visits 分别约 2.4/6.6/12.3 秒；首次模型加载和 shader 预热约 14.8 秒。实际速度取决于浏览器和 GPU。受限 MCTS 会比裸 policy 更能利用 value 和目差纠错，但 24 visits 仍远低于桌面 KataGo 的常用预算，棋力需要通过固定对手对局测量，不能从模型大小或单盘观感推断。
 
 详细原理、性能边界和 Rust/WASM 方案见 [架构说明](docs/architecture.md)；Web 与 WSL 模型选择见[模型和后端建议](docs/models-and-backends.md)。

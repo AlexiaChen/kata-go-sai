@@ -24,6 +24,7 @@ const SEARCH_CONFIGS: Record<AiLevel, MctsConfig> = {
     batchSize: 4,
     cpuct: 1,
     fpuReduction: 0.1,
+    scoreUtilityWeight: 0.08,
     rootSymmetryPruning: true,
   },
   balanced: {
@@ -32,6 +33,7 @@ const SEARCH_CONFIGS: Record<AiLevel, MctsConfig> = {
     batchSize: 4,
     cpuct: 1,
     fpuReduction: 0.1,
+    scoreUtilityWeight: 0.08,
     rootSymmetryPruning: true,
   },
   careful: {
@@ -40,6 +42,7 @@ const SEARCH_CONFIGS: Record<AiLevel, MctsConfig> = {
     batchSize: 4,
     cpuct: 1,
     fpuReduction: 0.1,
+    scoreUtilityWeight: 0.08,
     rootSymmetryPruning: true,
   },
 }

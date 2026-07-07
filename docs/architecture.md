@@ -55,6 +55,7 @@ KataGo 不是 NNUE。它以多层卷积/残差网络同时输出 policy、胜率
 - TensorFlow.js/WebGL：网络加载和 batch=4 推理；
 - Worker：搜索和张量执行均与 UI 线程隔离；
 - 搜索预算：当前为 4/12/24 visits，并受 4/8/16 秒硬上限约束；
+- 搜索策略：批量 PUCT、虚拟损失、子树复用、根节点对称裁剪、动态 FPU，以及把网络目差输出轻量加入 utility；
 - 目标：明显强于裸网络，但实际棋力必须通过固定硬件和对局集测量。
 
 Rust/WASM 仍适合搜索树和规则，但目前总耗时由卷积推理主导。先手写 Rust CPU 卷积不会自动变快；后续应先实测 WebGPU/ONNX Runtime Web，再决定迁移边界。
@@ -103,4 +104,4 @@ Engine Worker
 
 当前在无头 Chromium WebGL 环境中的一次开发态测量为：模型加载加 batch=1/batch=4 shader 预热约 14.8 秒；预热后 4/12/24 visits 搜索约 2.4/6.6/12.3 秒。batch=4 明显优于逐叶串行推理，但该数字不代表所有设备；生产部署和真实 GPU/移动设备仍需分别测量。
 
-当前 PUCT 是面向浏览器低预算的简化实现，并非逐行移植 KataGo 搜索。它未包含 KataGo 的 score utility、LCB、图搜索、子树价值偏差修正等高级机制。是否增强这些机制，应以固定 GTP 对手的胜率回归为依据。
+当前 PUCT 是面向浏览器低预算的简化实现，并非逐行移植 KataGo 搜索。它只加入了轻量 score utility 与动态 FPU，仍未包含 KataGo 的 LCB、图搜索、子树价值偏差修正、复杂传子/停一手处理等高级机制。是否增强这些机制，应以固定 GTP 对手的胜率回归为依据。

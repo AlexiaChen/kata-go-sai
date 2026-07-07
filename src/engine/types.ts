@@ -46,6 +46,8 @@ export interface AiResultResponse {
     move: Point | null
     visits: number
     value: number
+    utility: number
+    scoreLead: number
     prior: number
   }>
 }

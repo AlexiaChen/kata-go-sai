@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { createGame, passTurn, playMove } from '../game/rules'
 import { MctsSession, runMcts, type BatchEvaluator, type NetworkEvaluation } from './mcts'
 
-function evaluation(policyMoves: Array<[number, number]>, value = 0): NetworkEvaluation {
+function evaluation(policyMoves: Array<[number, number]>, value = 0, scoreLead = value * 10): NetworkEvaluation {
   const policyLogits = new Float32Array(362).fill(-12)
   policyMoves.forEach(([move, logit]) => { policyLogits[move] = logit })
   policyLogits[361] = -12
-  return { policyLogits, value, scoreLead: value * 10 }
+  return { policyLogits, value, scoreLead }
 }
 
 describe('batched PUCT search', () => {
@@ -58,6 +58,37 @@ describe('batched PUCT search', () => {
 
     expect(result.move).toBe(goodSearchMove)
     expect(result.candidates[0].visits).toBeGreaterThan(0)
+  })
+
+  it('uses score utility to prefer larger leads when win/loss value is tied', async () => {
+    const keepsLeadMove = 0
+    const slackMove = 1
+    const evaluator: BatchEvaluator = async (games) => games.map((game) => {
+      if (game.position.moveNumber === 0) {
+        return evaluation([[keepsLeadMove, 4], [slackMove, 4]], 0)
+      }
+      const firstMove = game.position.moveNumber === 1
+        ? game.position.lastMove
+        : game.history[1]?.lastMove
+      const rootScoreLead = firstMove === keepsLeadMove ? 18 : firstMove === slackMove ? -18 : 0
+      const sideToPlayScoreLead = game.position.moveNumber % 2 === 0 ? rootScoreLead : -rootScoreLead
+      return evaluation([], 0, sideToPlayScoreLead)
+    })
+
+    const result = await runMcts(createGame(9), evaluator, {
+      maxVisits: 16,
+      maxTimeMs: 10_000,
+      batchSize: 1,
+      cpuct: 1,
+      fpuReduction: 0.1,
+      rootSymmetryPruning: false,
+      scoreUtilityWeight: 0.2,
+      scoreUtilityScale: 9,
+    })
+
+    expect(result.move).toBe(keepsLeadMove)
+    expect(result.candidates[0].utility).toBeGreaterThan(result.candidates[0].value)
+    expect(result.candidates[0].scoreLead).toBeGreaterThan(0)
   })
 
   it('reuses a matching searched subtree on the next turn', async () => {

@@ -6,6 +6,8 @@ This file defines the working contract for coding agents in `kata-go-sai`.
 
 Build a browser-first Go/Weiqi application. The deployed static app must remain usable without a server. The current browser engine combines an official KataGo 10-block network with a low-visit batched PUCT/MCTS. Do not equate this simplified 4/12/24-visit search with full KataGo or claim professional strength without match evidence.
 
+Before model, engine, search, or strength-claim work, read `LEARNINGS.md` in this repository. Add a new learning when a mistake, external finding, benchmark, or implementation constraint should guide future agents.
+
 ## Required checks
 
 Before handing off a change, run:
@@ -59,7 +61,9 @@ Keep `rules.ts` data serializable with structured clone so it can cross a Worker
 
 The current bot is `kata1-b10c128-s1141046784-d204142634`, converted to a TensorFlow.js GraphModel and executed with WebGL inside a Worker. `kataFeatures.ts` is responsible for its 22 spatial and 19 global features, including ladder channels 14-17. Preserve named model inputs/outputs, current-player value perspective, tensor disposal, explicit initialization, and visible error states.
 
-`mcts.ts` owns batched PUCT selection, virtual loss, value backpropagation, root symmetry pruning, principal variation, and tree reuse. The three budgets are 4/12/24 new visits unless a measured change justifies different defaults. Do not silently replace model failures with heuristic play. A failure must be visible and the board must remain usable in two-player mode.
+`mcts.ts` owns batched PUCT selection, virtual loss, value and score-utility backpropagation, dynamic first-play urgency, root symmetry pruning, principal variation, and tree reuse. The three budgets are 4/12/24 new visits unless a measured change justifies different defaults. Do not silently replace model failures with heuristic play. A failure must be visible and the board must remain usable in two-player mode.
+
+The current Web model scope is b10 unless the user explicitly reopens model replacement. Do not spend implementation effort on b15/b18/b28 model swaps when the task is to improve the existing Web engine. Prefer search-efficiency work that keeps the b10 GraphModel, records measurements, and adds regression tests for the intended search behavior.
 
 Current and preferred long-term split:
 

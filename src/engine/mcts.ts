@@ -16,6 +16,8 @@ export interface MctsConfig {
   batchSize: number
   cpuct: number
   fpuReduction: number
+  scoreUtilityWeight?: number
+  scoreUtilityScale?: number
   rootSymmetryPruning?: boolean
 }
 
@@ -23,6 +25,8 @@ export interface MctsCandidate {
   move: Point | null
   visits: number
   value: number
+  utility: number
+  scoreLead: number
   prior: number
 }
 
@@ -45,6 +49,7 @@ interface SearchNode {
   pending: boolean
   visits: number
   networkValue: number
+  networkUtility: number
   scoreLead: number
   legalMoveCount: number
   edges: SearchEdge[]
@@ -55,6 +60,8 @@ interface SearchEdge {
   prior: number
   visits: number
   valueSum: number
+  utilitySum: number
+  scoreLeadSum: number
   virtualLoss: number
   child: SearchNode | null
 }
@@ -62,8 +69,16 @@ interface SearchEdge {
 interface SearchPath {
   leaf: SearchNode
   steps: Array<{ node: SearchNode; edge: SearchEdge }>
-  terminalValue: number | null
+  terminalEvaluation: SearchEvaluation | null
 }
+
+interface SearchEvaluation {
+  value: number
+  utility: number
+  scoreLead: number
+}
+
+const DEFAULT_SCORE_UTILITY_WEIGHT = 0.08
 
 export class MctsSession {
   private root: SearchNode | null = null
@@ -82,7 +97,7 @@ export class MctsSession {
     const retainedVisits = root.visits
     if (!root.expanded) {
       const [rootEvaluation] = await this.evaluate([game])
-      expand(root, rootEvaluation, config.rootSymmetryPruning !== false)
+      expand(root, rootEvaluation, config, config.rootSymmetryPruning !== false)
     }
 
     let completedVisits = 0
@@ -97,7 +112,7 @@ export class MctsSession {
       }
       if (paths.length === 0) break
 
-      const networkPaths = paths.filter((path) => path.terminalValue === null)
+      const networkPaths = paths.filter((path) => path.terminalEvaluation === null)
       const evaluations = networkPaths.length > 0
         ? await this.evaluate(networkPaths.map((path) => path.leaf.game))
         : []
@@ -105,17 +120,17 @@ export class MctsSession {
 
       let evaluationIndex = 0
       for (const path of paths) {
-        let leafValue: number
-        if (path.terminalValue !== null) {
-          leafValue = path.terminalValue
+        let leafEvaluation: SearchEvaluation
+        if (path.terminalEvaluation !== null) {
+          leafEvaluation = path.terminalEvaluation
         } else {
           const evaluation = evaluations[evaluationIndex]
           evaluationIndex += 1
-          expand(path.leaf, evaluation, false)
-          leafValue = evaluation.value
+          expand(path.leaf, evaluation, config, false)
+          leafEvaluation = searchEvaluation(path.leaf.game, evaluation, config)
         }
         path.leaf.pending = false
-        backpropagate(path, leafValue)
+        backpropagate(path, leafEvaluation)
         completedVisits += 1
       }
     }
@@ -125,9 +140,11 @@ export class MctsSession {
         move: edge.move,
         visits: edge.visits,
         value: edge.visits > 0 ? edge.valueSum / edge.visits : root.networkValue - config.fpuReduction,
+        utility: edge.visits > 0 ? edge.utilitySum / edge.visits : firstPlayUrgency(root, config),
+        scoreLead: edge.visits > 0 ? edge.scoreLeadSum / edge.visits : root.scoreLead,
         prior: edge.prior,
       }))
-      .sort((left, right) => right.visits - left.visits || right.value - left.value || right.prior - left.prior)
+      .sort((left, right) => right.visits - left.visits || right.utility - left.utility || right.prior - left.prior)
     const move = candidates[0]?.move ?? null
     this.root = root
 
@@ -161,16 +178,23 @@ function createNode(game: GameState): SearchNode {
     pending: false,
     visits: 0,
     networkValue: 0,
+    networkUtility: 0,
     scoreLead: 0,
     legalMoveCount: 0,
     edges: [],
   }
 }
 
-function expand(node: SearchNode, evaluation: NetworkEvaluation, pruneSymmetries: boolean): void {
+function expand(
+  node: SearchNode,
+  evaluation: NetworkEvaluation,
+  config: MctsConfig,
+  pruneSymmetries: boolean,
+): void {
   node.expanded = true
   node.networkValue = evaluation.value
   node.scoreLead = evaluation.scoreLead
+  node.networkUtility = searchEvaluation(node.game, evaluation, config).utility
 
   const legalMoves: Array<{ move: Point | null; logit: number }> = []
   const { board, size } = node.game.position
@@ -198,6 +222,8 @@ function expand(node: SearchNode, evaluation: NetworkEvaluation, pruneSymmetries
     prior: weights[index] / weightSum,
     visits: 0,
     valueSum: 0,
+    utilitySum: 0,
+    scoreLeadSum: 0,
     virtualLoss: 0,
     child: null,
   }))
@@ -280,7 +306,7 @@ function selectPath(root: SearchNode, config: MctsConfig): SearchPath | null {
   return {
     leaf: node,
     steps,
-    terminalValue: node.game.finished ? terminalValue(node.game) : null,
+    terminalEvaluation: node.game.finished ? terminalEvaluation(node.game, config) : null,
   }
 }
 
@@ -295,8 +321,8 @@ function selectEdge(node: SearchNode, config: MctsConfig): SearchEdge | null {
     if (edge.child?.pending) continue
     const effectiveVisits = edge.visits + edge.virtualLoss
     const q = effectiveVisits > 0
-      ? (edge.valueSum - edge.virtualLoss) / effectiveVisits
-      : node.networkValue - config.fpuReduction
+      ? (edge.utilitySum - edge.virtualLoss) / effectiveVisits
+      : firstPlayUrgency(node, config)
     const u = exploreScale * edge.prior / (1 + effectiveVisits)
     const score = q + u
     if (score > bestScore) {
@@ -313,21 +339,61 @@ function createChild(game: GameState, move: Point | null): SearchNode {
   return createNode(result.game)
 }
 
-function terminalValue(game: GameState): number {
+function terminalEvaluation(game: GameState, config: MctsConfig): SearchEvaluation {
   const score = scoreChineseArea(game)
-  return score.winner === game.position.toPlay ? 1 : -1
+  const value = score.winner === game.position.toPlay ? 1 : -1
+  const blackLead = score.black - score.white
+  const scoreLead = game.position.toPlay === 'black' ? blackLead : -blackLead
+  return {
+    value,
+    scoreLead,
+    utility: value + scoreUtility(scoreLead, game, config),
+  }
 }
 
-function backpropagate(path: SearchPath, leafValue: number): void {
-  let value = leafValue
+function backpropagate(path: SearchPath, leafEvaluation: SearchEvaluation): void {
+  let value = leafEvaluation.value
+  let utility = leafEvaluation.utility
+  let scoreLead = leafEvaluation.scoreLead
   for (let index = path.steps.length - 1; index >= 0; index -= 1) {
     const { node, edge } = path.steps[index]
     value = -value
+    utility = -utility
+    scoreLead = -scoreLead
     edge.virtualLoss = Math.max(0, edge.virtualLoss - 1)
     edge.visits += 1
     edge.valueSum += value
+    edge.utilitySum += utility
+    edge.scoreLeadSum += scoreLead
     node.visits += 1
   }
+}
+
+function searchEvaluation(
+  game: GameState,
+  evaluation: NetworkEvaluation,
+  config: MctsConfig,
+): SearchEvaluation {
+  return {
+    value: evaluation.value,
+    scoreLead: evaluation.scoreLead,
+    utility: evaluation.value + scoreUtility(evaluation.scoreLead, game, config),
+  }
+}
+
+function scoreUtility(scoreLead: number, game: GameState, config: MctsConfig): number {
+  const weight = config.scoreUtilityWeight ?? DEFAULT_SCORE_UTILITY_WEIGHT
+  if (weight <= 0) return 0
+  const scale = config.scoreUtilityScale ?? game.position.size
+  return weight * Math.tanh(scoreLead / Math.max(1, scale))
+}
+
+function firstPlayUrgency(node: SearchNode, config: MctsConfig): number {
+  const exploredPolicy = node.edges.reduce(
+    (sum, edge) => edge.visits + edge.virtualLoss > 0 ? sum + edge.prior : sum,
+    0,
+  )
+  return node.networkUtility - config.fpuReduction * Math.sqrt(exploredPolicy)
 }
 
 function releaseVirtualLosses(steps: SearchPath['steps']): void {
@@ -340,9 +406,17 @@ function principalVariation(root: SearchNode): Array<Point | null> {
   const variation: Array<Point | null> = []
   let node: SearchNode | null = root
   for (let depth = 0; depth < 12 && node?.expanded; depth += 1) {
-    const edge: SearchEdge | undefined = node.edges
-      .filter((candidate) => candidate.visits > 0)
-      .sort((left, right) => right.visits - left.visits || right.valueSum - left.valueSum)[0]
+    let edge: SearchEdge | undefined
+    for (const candidate of node.edges) {
+      if (candidate.visits <= 0) continue
+      if (
+        !edge ||
+        candidate.visits > edge.visits ||
+        (candidate.visits === edge.visits && candidate.utilitySum > edge.utilitySum)
+      ) {
+        edge = candidate
+      }
+    }
     if (!edge) break
     variation.push(edge.move)
     node = edge.child
